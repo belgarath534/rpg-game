@@ -134,5 +134,8 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
 
+      - name: Ask Apple directly if the key works
+        run: ruby scripts/check_asc_key.rb
+
       - name: Build and upload to TestFlight
         run: bundle exec fastlane beta
