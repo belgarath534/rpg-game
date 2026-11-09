@@ -1,0 +1,71 @@
+require "base64"
+
+default_platform(:ios)
+
+APP_ID = "com.solecho.game"
+CERTS_REPO = "https://github.com/belgarath534/ios-certificates.git"
+
+platform :ios do
+  desc "Build Sol Echo, sign it and upload it to TestFlight"
+  lane :beta do
+    setup_ci
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      duration: 1200,
+      in_house: false
+    )
+    UI.success("✅ App Store Connect API key works")
+
+    # Register the Bundle ID automatically if it doesn't exist yet.
+    if Spaceship::ConnectAPI::BundleId.find(APP_ID)
+      UI.success("✅ Bundle ID #{APP_ID} is registered")
+    else
+      Spaceship::ConnectAPI::BundleId.create(name: "Sol Echo", platform: "IOS", identifier: APP_ID)
+      UI.success("✅ Registered Bundle ID #{APP_ID}")
+    end
+
+    # Creates (first run) or downloads (later runs) the signing certificate and profile,
+    # stored encrypted in the private ios-certificates repo.
+    match(
+      type: "appstore",
+      app_identifier: APP_ID,
+      git_url: CERTS_REPO,
+      git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV.fetch('CERTS_REPO_TOKEN')}"),
+      api_key: api_key,
+      readonly: false
+    )
+    team_id = ENV.fetch("sigh_#{APP_ID}_appstore_team-id")
+    profile = ENV.fetch("sigh_#{APP_ID}_appstore_profile-name")
+    UI.success("✅ Signing ready (team #{team_id})")
+
+    build_app(
+      project: "SolEcho.xcodeproj",
+      scheme: "SolEcho",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build",
+      xcargs: [
+        "CODE_SIGN_STYLE=Manual",
+        "DEVELOPMENT_TEAM=#{team_id}",
+        "CODE_SIGN_IDENTITY='Apple Distribution'",
+        "PROVISIONING_PROFILE_SPECIFIER='#{profile}'",
+        "CURRENT_PROJECT_VERSION=#{ENV.fetch('GITHUB_RUN_NUMBER', '1')}"
+      ].join(" "),
+      export_options: { provisioningProfiles: { APP_ID => profile } }
+    )
+    UI.success("✅ App built and signed")
+
+    unless Spaceship::ConnectAPI::App.find(APP_ID)
+      UI.user_error!(
+        "Build works, but the app doesn't exist in App Store Connect yet. " \
+        "Create it there (Apps → + → New App, Bundle ID #{APP_ID}) and run the workflow again."
+      )
+    end
+
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+    UI.success("🚀 Uploaded to TestFlight! It shows up on your phone after Apple processes it (~10-30 min).")
+  end
+end

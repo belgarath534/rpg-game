@@ -1,0 +1,69 @@
+name: TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        run: |
+          missing=0
+          for name in ASC_KEY_ID ASC_ISSUER_ID MATCH_PASSWORD CERTS_REPO_TOKEN; do
+            if [ -z "${!name}" ]; then echo "❌ $name is missing"; missing=1; else echo "✅ $name is set"; fi
+          done
+          exit $missing
+
+      - name: Get API key file from ios-certificates
+        uses: actions/checkout@v4
+        with:
+          repository: belgarath534/ios-certificates
+          token: ${{ secrets.CERTS_REPO_TOKEN }}
+          path: .certs-repo
+
+      - name: Find .p8 key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$HOME/.asc"
+          if [ -n "$ASC_KEY_P8" ]; then
+            printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/key.p8"
+            echo "✅ Using ASC_KEY_P8 secret"
+          else
+            P8=$(find .certs-repo -name '*.p8' -not -path '*/.git/*' | head -1)
+            if [ -z "$P8" ]; then echo "❌ No .p8 file found in ios-certificates"; exit 1; fi
+            echo "✅ Found $(basename "$P8") in ios-certificates"
+            case "$(basename "$P8")" in
+              *"$ASC_KEY_ID"*) echo "✅ File name matches ASC_KEY_ID" ;;
+              *) echo "⚠️ File name doesn't contain ASC_KEY_ID — double-check the Key ID secret" ;;
+            esac
+            cp "$P8" "$HOME/.asc/key.p8"
+          fi
+          rm -rf .certs-repo
+          echo "ASC_KEY_PATH=$HOME/.asc/key.p8" >> "$GITHUB_ENV"
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Build and upload to TestFlight
+        run: bundle exec fastlane beta
