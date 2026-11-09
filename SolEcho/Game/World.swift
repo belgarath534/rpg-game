@@ -156,11 +156,17 @@ enum World {
     }
 
     /// One line per direction, e.g. "East: Glasswater Shore". Used for navigation and VoiceOver.
-    static func surroundings(of p: Position) -> [(Direction, String)] {
+    static func surroundings(of p: Position) -> [Surrounding] {
         Direction.allCases.map { dir in
             let next = neighbor(of: p, toward: dir)
             let label = contains(next) ? biome(at: next).regionName : "Impassable"
-            return (dir, label)
+            return Surrounding(direction: dir, place: label)
         }
     }
+}
+
+struct Surrounding: Identifiable {
+    let direction: Direction
+    let place: String
+    var id: Direction { direction }
 }
