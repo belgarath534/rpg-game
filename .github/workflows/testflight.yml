@@ -65,6 +65,7 @@ jobs:
 
       - name: Get API key file from ios-certificates
         if: env.TOKEN_OK == 'true' || env.HAS_P8 != 'true'
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: belgarath534/ios-certificates
@@ -79,6 +80,7 @@ jobs:
           fingerprint() { openssl pkey -in "$1" -pubout 2>/dev/null | openssl sha256 | awk '{print $NF}'; }
           P8=""
           [ -d .certs-repo ] && P8=$(find .certs-repo -name '*.p8' -not -path '*/.git/*' | head -1)
+          [ -z "$P8" ] && echo "ℹ️ No .p8 file in ios-certificates (the repo is empty or has no key file)"
           if [ -n "$P8" ]; then
             NAME=$(basename "$P8")
             echo "✅ Found $NAME in ios-certificates"
