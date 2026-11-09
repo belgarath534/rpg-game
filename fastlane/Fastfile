@@ -33,7 +33,7 @@ platform :ios do
       type: "appstore",
       app_identifier: APP_ID,
       git_url: CERTS_REPO,
-      git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV.fetch('CERTS_REPO_TOKEN')}"),
+      git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV['CLEAN_CERTS_TOKEN'] || ENV.fetch('CERTS_REPO_TOKEN')}"),
       api_key: api_key,
       readonly: false
     )

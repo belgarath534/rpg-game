@@ -38,11 +38,21 @@ jobs:
           done
           exit $missing
 
+      - name: Clean up token (remove spaces and line breaks)
+        run: |
+          CLEAN=$(printf '%s' "$CERTS_REPO_TOKEN" | tr -d '[:space:]')
+          echo "::add-mask::$CLEAN"
+          case "$CLEAN" in
+            github_pat_*|ghp_*) echo "✅ Token looks like a GitHub token" ;;
+            *) echo "⚠️ Token doesn't start with github_pat_ — it may be incomplete" ;;
+          esac
+          echo "CLEAN_CERTS_TOKEN=$CLEAN" >> "$GITHUB_ENV"
+
       - name: Get API key file from ios-certificates
         uses: actions/checkout@v4
         with:
           repository: belgarath534/ios-certificates
-          token: ${{ secrets.CERTS_REPO_TOKEN }}
+          token: ${{ env.CLEAN_CERTS_TOKEN }}
           path: .certs-repo
 
       - name: Find .p8 key
