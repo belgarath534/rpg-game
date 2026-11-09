@@ -38,17 +38,33 @@ jobs:
           done
           exit $missing
 
-      - name: Clean up token (remove spaces and line breaks)
+      - name: Check certs token
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
           CLEAN=$(printf '%s' "$CERTS_REPO_TOKEN" | tr -d '[:space:]')
           echo "::add-mask::$CLEAN"
-          case "$CLEAN" in
-            github_pat_*|ghp_*) echo "✅ Token looks like a GitHub token" ;;
-            *) echo "⚠️ Token doesn't start with github_pat_ — it may be incomplete" ;;
-          esac
           echo "CLEAN_CERTS_TOKEN=$CLEAN" >> "$GITHUB_ENV"
+          [ -n "$ASC_KEY_P8" ] && echo "HAS_P8=true" >> "$GITHUB_ENV"
+          echo "Token length: ${#CLEAN} characters (a full fine-grained token is about 93, a classic ghp_ token is 40)"
+          case "$CLEAN" in
+            github_pat_*) echo "✅ Starts with github_pat_" ;;
+            ghp_*) echo "✅ Starts with ghp_ (classic token)" ;;
+            *) echo "⚠️ Doesn't start with github_pat_ — it's incomplete or not a GitHub token" ;;
+          esac
+          USER_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLEAN" https://api.github.com/user)
+          REPO_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLEAN" https://api.github.com/repos/belgarath534/ios-certificates)
+          if [ "$USER_CODE" = "401" ]; then
+            echo "❌ GitHub rejects this token (401 Bad credentials): it's mistyped, cut off, expired or deleted. Make a new one."
+          elif [ "$REPO_CODE" = "200" ]; then
+            echo "✅ Token works and can see ios-certificates"
+            echo "TOKEN_OK=true" >> "$GITHUB_ENV"
+          else
+            echo "❌ Token is valid but can't see ios-certificates (HTTP $REPO_CODE). Give it access to that repo."
+          fi
 
       - name: Get API key file from ios-certificates
+        if: env.HAS_P8 != 'true'
         uses: actions/checkout@v4
         with:
           repository: belgarath534/ios-certificates

@@ -27,6 +27,13 @@ platform :ios do
       UI.success("✅ Registered Bundle ID #{APP_ID}")
     end
 
+    unless ENV["TOKEN_OK"] == "true"
+      UI.user_error!(
+        "Apple key works and the Bundle ID is ready! 🎉 " \
+        "Signing stopped because CERTS_REPO_TOKEN doesn't work yet — see the 'Check certs token' step."
+      )
+    end
+
     # Creates (first run) or downloads (later runs) the signing certificate and profile,
     # stored encrypted in the private ios-certificates repo.
     match(
