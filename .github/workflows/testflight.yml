@@ -6,67 +6,30 @@ on:
 jobs:
   testflight:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       # The Issuer ID only identifies the App Store Connect team; it isn't secret.
       ASC_ISSUER_ID_PUBLIC: cf0b60a4-0dcd-4651-ba53-0aba0bc6c678
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD || secrets.MATCH_PASSWORRD }}
       CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Check secrets
-        env:
-          VAR_MATCH_PASSWORD: ${{ vars.MATCH_PASSWORD != '' && 'yes' || 'no' }}
-          VAR_CERTS_REPO_TOKEN: ${{ vars.CERTS_REPO_TOKEN != '' && 'yes' || 'no' }}
-          VAR_ASC_KEY_ID: ${{ vars.ASC_KEY_ID != '' && 'yes' || 'no' }}
-          VAR_ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID != '' && 'yes' || 'no' }}
         run: |
           missing=0
-          for name in ASC_KEY_ID ASC_ISSUER_ID MATCH_PASSWORD CERTS_REPO_TOKEN; do
-            if [ -n "${!name}" ]; then
-              echo "✅ $name is set"
-            else
-              missing=1
-              var="VAR_$name"
-              if [ "${!var}" = "yes" ]; then
-                echo "❌ $name was added as a VARIABLE, not a SECRET. Re-add it under the Secrets tab."
-              else
-                echo "❌ $name is missing from rpg-game → Settings → Secrets and variables → Actions → Secrets"
-              fi
-            fi
+          for name in MATCH_PASSWORD CERTS_REPO_TOKEN; do
+            if [ -n "${!name}" ]; then echo "✅ $name is set"; else echo "❌ $name is missing"; missing=1; fi
           done
-          exit $missing
-
-      - name: Check certs token
-        env:
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-        run: |
           CLEAN=$(printf '%s' "$CERTS_REPO_TOKEN" | tr -d '[:space:]')
           echo "::add-mask::$CLEAN"
           echo "CLEAN_CERTS_TOKEN=$CLEAN" >> "$GITHUB_ENV"
-          [ -n "$ASC_KEY_P8" ] && echo "HAS_P8=true" >> "$GITHUB_ENV"
-          echo "Token length: ${#CLEAN} characters (a full fine-grained token is about 93, a classic ghp_ token is 40)"
-          case "$CLEAN" in
-            github_pat_*) echo "✅ Starts with github_pat_" ;;
-            ghp_*) echo "✅ Starts with ghp_ (classic token)" ;;
-            *) echo "⚠️ Doesn't start with github_pat_ — it's incomplete or not a GitHub token" ;;
-          esac
-          USER_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLEAN" https://api.github.com/user)
-          REPO_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLEAN" https://api.github.com/repos/belgarath534/ios-certificates)
-          if [ "$USER_CODE" = "401" ]; then
-            echo "❌ GitHub rejects this token (401 Bad credentials): it's mistyped, cut off, expired or deleted. Make a new one."
-          elif [ "$REPO_CODE" = "200" ]; then
-            echo "✅ Token works and can see ios-certificates"
-            echo "TOKEN_OK=true" >> "$GITHUB_ENV"
-          else
-            echo "❌ Token is valid but can't see ios-certificates (HTTP $REPO_CODE). Give it access to that repo."
-          fi
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLEAN" https://api.github.com/repos/belgarath534/ios-certificates)
+          if [ "$CODE" = "200" ]; then echo "✅ Token can reach ios-certificates"; else echo "❌ Token can't reach ios-certificates (HTTP $CODE)"; missing=1; fi
+          exit $missing
 
-      - name: Get API key file from ios-certificates
-        if: env.TOKEN_OK == 'true' || env.HAS_P8 != 'true'
+      - name: Get key files from ios-certificates
         continue-on-error: true
         uses: actions/checkout@v4
         with:
@@ -74,51 +37,27 @@ jobs:
           token: ${{ env.CLEAN_CERTS_TOKEN }}
           path: .certs-repo
 
-      - name: Find .p8 key
+      - name: Collect Apple API keys
         env:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
-          mkdir -p "$HOME/.asc"
-          fingerprint() { openssl pkey -in "$1" -pubout 2>/dev/null | openssl sha256 | awk '{print $NF}'; }
-          P8=""
-          [ -d .certs-repo ] && P8=$(find .certs-repo -name '*.p8' -not -path '*/.git/*' | head -1)
-          [ -z "$P8" ] && echo "ℹ️ No .p8 file in ios-certificates (the repo is empty or has no key file)"
-          if [ -n "$P8" ]; then
-            NAME=$(basename "$P8")
-            echo "✅ Found $NAME in ios-certificates"
-            FILE_KEY_ID=$(echo "$NAME" | sed -n 's/^AuthKey_\([A-Za-z0-9]*\)\.p8$/\1/p')
-            if [ -n "$FILE_KEY_ID" ]; then
-              [ "$FILE_KEY_ID" = "$ASC_KEY_ID" ] && echo "✅ File name matches the ASC_KEY_ID secret" \
-                || echo "⚠️ ASC_KEY_ID secret doesn't match the file — using the Key ID from the file name ($FILE_KEY_ID)"
-              echo "FILE_KEY_ID=$FILE_KEY_ID" >> "$GITHUB_ENV"
-            fi
-            cp "$P8" "$HOME/.asc/key.p8"
-            if [ -n "$ASC_KEY_P8" ]; then
-              printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/secret.p8"
-              if [ "$(fingerprint "$HOME/.asc/secret.p8")" = "$(fingerprint "$P8")" ]; then
-                echo "✅ ASC_KEY_P8 secret is the same key as the file"
-              else
-                echo "⚠️ ASC_KEY_P8 secret is a DIFFERENT key than $NAME — using the file"
-              fi
-              rm -f "$HOME/.asc/secret.p8"
-            fi
-          elif [ -n "$ASC_KEY_P8" ]; then
-            printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/key.p8"
-            echo "✅ Using ASC_KEY_P8 secret"
-          else
-            echo "❌ No .p8 key found (no ASC_KEY_P8 secret and none in ios-certificates)"; exit 1
+          mkdir -p "$HOME/.asc/candidates"
+          if [ -d .certs-repo ]; then
+            find .certs-repo -name '*.p8' -not -path '*/.git/*' -exec cp {} "$HOME/.asc/candidates/" \;
+          fi
+          if [ -n "$ASC_KEY_P8" ] && [ -n "$ASC_KEY_ID" ]; then
+            printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/candidates/secret_$(printf '%s' "$ASC_KEY_ID" | tr -d '[:space:]').p8"
           fi
           rm -rf .certs-repo
-          echo "ASC_KEY_PATH=$HOME/.asc/key.p8" >> "$GITHUB_ENV"
-          KEY="$HOME/.asc/key.p8"
-          echo "Key file: $(wc -l < "$KEY" | tr -d ' ') lines, $(wc -c < "$KEY" | tr -d ' ') characters (a real .p8 is 6 lines, about 257 characters)"
-          grep -q -- "-----BEGIN PRIVATE KEY-----" "$KEY" && echo "✅ Has BEGIN PRIVATE KEY line" || echo "❌ Missing the -----BEGIN PRIVATE KEY----- line"
-          grep -q -- "-----END PRIVATE KEY-----" "$KEY" && echo "✅ Has END PRIVATE KEY line" || echo "❌ Missing the -----END PRIVATE KEY----- line"
-          if openssl pkey -in "$KEY" -noout 2>/dev/null; then echo "✅ Key text is a valid private key"; else echo "❌ Key text is damaged — it isn't a valid private key"; fi
-          echo "Key ID length: ${#ASC_KEY_ID} (should be 10). Issuer ID length: ${#ASC_ISSUER_ID} (should be 36)"
-          CLEAN_ISSUER=$(printf '%s' "$ASC_ISSUER_ID" | tr -d '[:space:]')
-          [ "$CLEAN_ISSUER" = "$ASC_ISSUER_ID_PUBLIC" ] && echo "✅ ASC_ISSUER_ID secret matches the Issuer ID in the workflow" \
-            || echo "⚠️ ASC_ISSUER_ID secret is DIFFERENT from cf0b60a4-... — using the one in the workflow"
+          echo "Keys found: $(ls "$HOME/.asc/candidates" | tr '\n' ' ')"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Find the key Apple accepts
+        run: ruby scripts/check_asc_key.rb
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -129,13 +68,5 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-
-      - name: Ask Apple directly if the key works
-        run: ruby scripts/check_asc_key.rb
-
-      - name: Build and upload to TestFlight
+      - name: Build, upload to TestFlight and update the store listing
         run: bundle exec fastlane beta

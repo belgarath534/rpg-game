@@ -13,3 +13,8 @@ DerivedData/
 *.p8
 *.p12
 *.mobileprovision
+
+# fastlane output
+fastlane/report.xml
+fastlane/README.md
+fastlane/test_output/

@@ -3,53 +3,30 @@ require "base64"
 default_platform(:ios)
 
 APP_ID = "com.solecho.game"
+APP_VERSION = "1.0"
 CERTS_REPO = "https://github.com/belgarath534/ios-certificates.git"
+TESTFLIGHT_DIR = File.expand_path("testflight", __dir__)
 
 platform :ios do
-  desc "Build Sol Echo, sign it and upload it to TestFlight"
+  desc "Build Sol Echo, upload it to TestFlight and fill in the App Store listing"
   lane :beta do
     setup_ci
 
-    key_options = {
-      key_id: (ENV["FILE_KEY_ID"].to_s.empty? ? ENV.fetch("ASC_KEY_ID") : ENV["FILE_KEY_ID"]).strip,
+    # The workflow's "Find the key Apple accepts" step picks the working key.
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("GOOD_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID_PUBLIC"),
       key_filepath: ENV.fetch("ASC_KEY_PATH"),
       duration: 1200,
       in_house: false
-    }
+    )
 
-    # Try it as a Team key (with Issuer ID) first, then as an Individual key (no Issuer ID).
-    api_key = app_store_connect_api_key(**key_options, issuer_id: (ENV["ASC_ISSUER_ID_PUBLIC"] || ENV.fetch("ASC_ISSUER_ID")).strip)
-    begin
-      Spaceship::ConnectAPI::BundleId.all(limit: 1)
-      UI.success("✅ Apple accepted the API key (Team key)")
-    rescue StandardError => team_error
-      UI.important("Apple rejected the key as a Team key (#{team_error.message.lines.first&.strip}). Trying as an Individual key...")
-      begin
-        api_key = app_store_connect_api_key(**key_options, issuer_id: nil)
-        Spaceship::ConnectAPI::BundleId.all(limit: 1)
-        UI.success("✅ Apple accepted the API key (Individual key)")
-      rescue StandardError
-        UI.user_error!(
-          "❌ Apple rejected the API key. One of these doesn't match: the .p8 text (ASC_KEY_P8), " \
-          "the Key ID (ASC_KEY_ID) or the Issuer ID (ASC_ISSUER_ID). Check the 'Find .p8 key' step for clues, " \
-          "and make sure the key wasn't revoked in App Store Connect."
-        )
-      end
-    end
-
-    # Register the Bundle ID automatically if it doesn't exist yet.
-    if Spaceship::ConnectAPI::BundleId.find(APP_ID)
-      UI.success("✅ Bundle ID #{APP_ID} is registered")
-    else
+    unless Spaceship::ConnectAPI::BundleId.find(APP_ID)
       Spaceship::ConnectAPI::BundleId.create(name: "Sol Echo", platform: "IOS", identifier: APP_ID)
       UI.success("✅ Registered Bundle ID #{APP_ID}")
     end
-
-    unless ENV["TOKEN_OK"] == "true"
-      UI.user_error!(
-        "Apple key works and the Bundle ID is ready! 🎉 " \
-        "Signing stopped because CERTS_REPO_TOKEN doesn't work yet — see the 'Check certs token' step."
-      )
+    unless Spaceship::ConnectAPI::App.find(APP_ID)
+      UI.user_error!("The app doesn't exist in App Store Connect yet. Create it (Apps → + → New App, Bundle ID #{APP_ID}) and run again.")
     end
 
     # Creates (first run) or downloads (later runs) the signing certificate and profile,
@@ -58,7 +35,7 @@ platform :ios do
       type: "appstore",
       app_identifier: APP_ID,
       git_url: CERTS_REPO,
-      git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV['CLEAN_CERTS_TOKEN'] || ENV.fetch('CERTS_REPO_TOKEN')}"),
+      git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV.fetch('CLEAN_CERTS_TOKEN')}"),
       api_key: api_key,
       readonly: false
     )
@@ -77,20 +54,49 @@ platform :ios do
         "DEVELOPMENT_TEAM=#{team_id}",
         "CODE_SIGN_IDENTITY='Apple Distribution'",
         "PROVISIONING_PROFILE_SPECIFIER='#{profile}'",
+        "MARKETING_VERSION=#{APP_VERSION}",
         "CURRENT_PROJECT_VERSION=#{ENV.fetch('GITHUB_RUN_NUMBER', '1')}"
       ].join(" "),
       export_options: { provisioningProfiles: { APP_ID => profile } }
     )
     UI.success("✅ App built and signed")
 
-    unless Spaceship::ConnectAPI::App.find(APP_ID)
-      UI.user_error!(
-        "Build works, but the app doesn't exist in App Store Connect yet. " \
-        "Create it there (Apps → + → New App, Bundle ID #{APP_ID}) and run the workflow again."
-      )
-    end
+    upload_to_testflight(
+      api_key: api_key,
+      changelog: File.read(File.join(TESTFLIGHT_DIR, "what_to_test.txt")).strip,
+      beta_app_description: File.read(File.join(TESTFLIGHT_DIR, "beta_description.txt")).strip,
+      localized_app_info: {
+        "default" => {
+          description: File.read(File.join(TESTFLIGHT_DIR, "beta_description.txt")).strip,
+          privacy_policy_url: "https://github.com/belgarath534/rpg-game/blob/HEAD/PRIVACY.md"
+        }
+      },
+      uses_non_exempt_encryption: false,
+      distribute_external: false,
+      skip_waiting_for_build_processing: false,
+      wait_processing_timeout_duration: 2700
+    )
+    UI.success("🚀 Build is on TestFlight with its 'What to Test' notes")
 
-    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
-    UI.success("🚀 Uploaded to TestFlight! It shows up on your phone after Apple processes it (~10-30 min).")
+    # Store listing: text, categories, age rating, URLs. No screenshots and no submission for review.
+    begin
+      deliver(
+        api_key: api_key,
+        app_identifier: APP_ID,
+        app_version: APP_VERSION,
+        metadata_path: "./fastlane/metadata",
+        app_rating_config_path: "./fastlane/age_rating.json",
+        skip_binary_upload: true,
+        skip_screenshots: true,
+        skip_app_version_update: false,
+        submit_for_review: false,
+        automatic_release: false,
+        run_precheck_before_submit: false,
+        force: true
+      )
+      UI.success("📝 App Store listing updated")
+    rescue StandardError => e
+      UI.important("⚠️ The TestFlight build is fine, but the store listing upload hit a problem: #{e.message}")
+    end
   end
 end

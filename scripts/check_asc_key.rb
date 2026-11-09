@@ -1,5 +1,5 @@
-# Talks to Apple directly (no fastlane) to see exactly why an App Store Connect API key is accepted or rejected.
-# Prints only HTTP status codes and Apple's error messages, never the key.
+# Tries every App Store Connect API key the workflow collected and keeps the first one Apple accepts.
+# Talks to Apple directly (no fastlane). Prints only Key IDs, status codes and Apple's error messages.
 require "openssl"
 require "base64"
 require "json"
@@ -7,42 +7,54 @@ require "net/http"
 
 def b64(data) = Base64.urlsafe_encode64(data, padding: false)
 
-def make_jwt(key, kid, payload)
+def make_jwt(key, kid, issuer)
+  now = Time.now.to_i
   header = { alg: "ES256", kid: kid, typ: "JWT" }
+  payload = { iss: issuer, iat: now, exp: now + 600, aud: "appstoreconnect-v1" }
   signing_input = "#{b64(header.to_json)}.#{b64(payload.to_json)}"
   der = key.sign(OpenSSL::Digest.new("SHA256"), signing_input)
   r, s = OpenSSL::ASN1.decode(der).value.map { |n| n.value.to_s(2).rjust(32, "\0")[-32..] }
   "#{signing_input}.#{b64(r + s)}"
 end
 
-def ask_apple(token)
+def apple_status(token)
   uri = URI("https://api.appstoreconnect.apple.com/v1/bundleIds?limit=1")
   request = Net::HTTP::Get.new(uri)
   request["Authorization"] = "Bearer #{token}"
   Net::HTTP.start(uri.host, 443, use_ssl: true) { |http| http.request(request) }
 end
 
-key = OpenSSL::PKey.read(File.read(ENV.fetch("ASC_KEY_PATH")))
-kid = ENV["FILE_KEY_ID"].to_s.empty? ? ENV.fetch("ASC_KEY_ID").strip : ENV["FILE_KEY_ID"]
 issuer = (ENV["ASC_ISSUER_ID_PUBLIC"] || ENV.fetch("ASC_ISSUER_ID")).strip
-now = Time.now.to_i
-puts "Runner clock (UTC): #{Time.now.utc}"
-puts "Testing Key ID #{kid} with Issuer ID #{issuer[0, 8]}..."
+files = Dir[File.join(Dir.home, ".asc", "candidates", "*.p8")].sort
+abort "❌ No .p8 keys found. Upload your AuthKey_XXXXXXXXXX.p8 to the ios-certificates repo." if files.empty?
 
-tests = {
-  "Team key" => { iss: issuer, iat: now, exp: now + 600, aud: "appstoreconnect-v1" },
-  "Individual key" => { sub: "user", iat: now, exp: now + 600, aud: "appstoreconnect-v1" },
-}
-accepted = nil
-tests.each do |name, payload|
-  response = ask_apple(make_jwt(key, kid, payload))
+winner = nil
+files.each do |path|
+  name = File.basename(path)
+  kid = name[/\A(?:AuthKey_|secret_)([A-Za-z0-9]+)\.p8\z/, 1]
+  unless kid
+    puts "⚠️ Skipping #{name}: can't tell its Key ID (name it AuthKey_<KEYID>.p8)"
+    next
+  end
+  begin
+    key = OpenSSL::PKey.read(File.read(path))
+  rescue OpenSSL::PKey::PKeyError
+    puts "❌ #{kid}: the file isn't a valid private key"
+    next
+  end
+  response = apple_status(make_jwt(key, kid, issuer))
   if response.code == "200"
-    puts "✅ Apple ACCEPTS this as a #{name}"
-    accepted ||= name
+    puts "✅ #{kid}: Apple accepts this key"
+    winner = [path, kid]
+    break
   else
-    puts "❌ As a #{name}: HTTP #{response.code}"
-    errors = (JSON.parse(response.body)["errors"] rescue nil) || []
-    errors.each { |e| puts "   #{e['code']}: #{e['title']} — #{e['detail']}" }
+    detail = ((JSON.parse(response.body)["errors"] || []).first || {})["code"] rescue nil
+    puts "❌ #{kid}: Apple rejects it (HTTP #{response.code} #{detail})"
   end
 end
-File.write(ENV["GITHUB_ENV"], "ASC_KEY_TYPE=#{accepted == 'Individual key' ? 'individual' : 'team'}\n", mode: "a") if ENV["GITHUB_ENV"]
+
+abort "❌ Apple rejected every key. Create a new Team key (Admin) and upload its .p8 to ios-certificates." unless winner
+
+if ENV["GITHUB_ENV"]
+  File.write(ENV["GITHUB_ENV"], "ASC_KEY_PATH=#{winner[0]}\nGOOD_KEY_ID=#{winner[1]}\n", mode: "a")
+end
