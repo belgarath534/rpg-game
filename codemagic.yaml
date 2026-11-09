@@ -20,7 +20,12 @@ workflows:
           fi
       - name: Talk to Apple and register com.solecho.game
         script: |
-          app-store-connect bundle-ids list --bundle-id-identifier com.solecho.game || true
-          app-store-connect bundle-ids create com.solecho.game --name "Sol Echo" --platform IOS \
-            || echo "(It may already exist — that's fine if the list above shows it)"
+          # If the key is bad, this fails and the build goes red.
+          EXISTING=$(app-store-connect bundle-ids list --bundle-id-identifier com.solecho.game --json)
           echo "✅ Apple accepted Codemagic's key"
+          if echo "$EXISTING" | grep -q '"com.solecho.game"'; then
+            echo "✅ Bundle ID com.solecho.game is already registered"
+          else
+            app-store-connect bundle-ids create com.solecho.game --name "Sol Echo" --platform IOS
+            echo "✅ Registered Bundle ID com.solecho.game"
+          fi
