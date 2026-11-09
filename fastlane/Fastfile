@@ -8,6 +8,41 @@ CERTS_REPO = "https://github.com/belgarath534/ios-certificates.git"
 TESTFLIGHT_DIR = File.expand_path("testflight", __dir__)
 
 platform :ios do
+  desc "Upload only the App Store listing (text, categories, age rating, URLs)"
+  lane :listing do |options|
+    api_key = options[:api_key] || app_store_connect_api_key(
+      key_id: ENV.fetch("GOOD_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID_PUBLIC"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      duration: 1200,
+      in_house: false
+    )
+
+    # fastlane needs the app's name to update the app-level info (subtitle, privacy URL),
+    # so reuse the name already chosen in App Store Connect.
+    app = Spaceship::ConnectAPI::App.find(APP_ID)
+    UI.user_error!("The app doesn't exist in App Store Connect yet.") unless app
+    name_file = File.expand_path("metadata/en-US/name.txt", __dir__)
+    File.write(name_file, "#{app.name}\n") unless File.exist?(name_file)
+    UI.message("App name in App Store Connect: #{app.name}")
+
+    deliver(
+      api_key: api_key,
+      app_identifier: APP_ID,
+      app_version: APP_VERSION,
+      metadata_path: File.expand_path("metadata", __dir__),
+      app_rating_config_path: File.expand_path("age_rating.json", __dir__),
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      skip_app_version_update: false,
+      submit_for_review: false,
+      automatic_release: false,
+      run_precheck_before_submit: false,
+      force: true
+    )
+    UI.success("📝 App Store listing updated")
+  end
+
   desc "Build Sol Echo, upload it to TestFlight and fill in the App Store listing"
   lane :beta do
     setup_ci
@@ -78,23 +113,8 @@ platform :ios do
     )
     UI.success("🚀 Build is on TestFlight with its 'What to Test' notes")
 
-    # Store listing: text, categories, age rating, URLs. No screenshots and no submission for review.
     begin
-      deliver(
-        api_key: api_key,
-        app_identifier: APP_ID,
-        app_version: APP_VERSION,
-        metadata_path: "./fastlane/metadata",
-        app_rating_config_path: "./fastlane/age_rating.json",
-        skip_binary_upload: true,
-        skip_screenshots: true,
-        skip_app_version_update: false,
-        submit_for_review: false,
-        automatic_release: false,
-        run_precheck_before_submit: false,
-        force: true
-      )
-      UI.success("📝 App Store listing updated")
+      listing(api_key: api_key)
     rescue StandardError => e
       UI.important("⚠️ The TestFlight build is fine, but the store listing upload hit a problem: #{e.message}")
     end

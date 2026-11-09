@@ -18,3 +18,4 @@ DerivedData/
 fastlane/report.xml
 fastlane/README.md
 fastlane/test_output/
+fastlane/metadata/en-US/name.txt
