@@ -11,7 +11,7 @@ platform :ios do
     setup_ci
 
     key_options = {
-      key_id: ENV.fetch("ASC_KEY_ID").strip,
+      key_id: (ENV["FILE_KEY_ID"].to_s.empty? ? ENV.fetch("ASC_KEY_ID") : ENV["FILE_KEY_ID"]).strip,
       key_filepath: ENV.fetch("ASC_KEY_PATH"),
       duration: 1200,
       in_house: false

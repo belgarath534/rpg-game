@@ -88,7 +88,7 @@ jobs:
             if [ -n "$FILE_KEY_ID" ]; then
               [ "$FILE_KEY_ID" = "$ASC_KEY_ID" ] && echo "✅ File name matches the ASC_KEY_ID secret" \
                 || echo "⚠️ ASC_KEY_ID secret doesn't match the file — using the Key ID from the file name ($FILE_KEY_ID)"
-              echo "ASC_KEY_ID=$FILE_KEY_ID" >> "$GITHUB_ENV"
+              echo "FILE_KEY_ID=$FILE_KEY_ID" >> "$GITHUB_ENV"
             fi
             cp "$P8" "$HOME/.asc/key.p8"
             if [ -n "$ASC_KEY_P8" ]; then
