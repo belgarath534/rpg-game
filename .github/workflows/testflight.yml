@@ -10,7 +10,7 @@ jobs:
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD || secrets.MATCH_PASSWORRD }}
       CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v4
