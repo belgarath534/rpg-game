@@ -16,10 +16,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check secrets
+        env:
+          VAR_MATCH_PASSWORD: ${{ vars.MATCH_PASSWORD != '' && 'yes' || 'no' }}
+          VAR_CERTS_REPO_TOKEN: ${{ vars.CERTS_REPO_TOKEN != '' && 'yes' || 'no' }}
+          VAR_ASC_KEY_ID: ${{ vars.ASC_KEY_ID != '' && 'yes' || 'no' }}
+          VAR_ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID != '' && 'yes' || 'no' }}
         run: |
           missing=0
           for name in ASC_KEY_ID ASC_ISSUER_ID MATCH_PASSWORD CERTS_REPO_TOKEN; do
-            if [ -z "${!name}" ]; then echo "❌ $name is missing"; missing=1; else echo "✅ $name is set"; fi
+            if [ -n "${!name}" ]; then
+              echo "✅ $name is set"
+            else
+              missing=1
+              var="VAR_$name"
+              if [ "${!var}" = "yes" ]; then
+                echo "❌ $name was added as a VARIABLE, not a SECRET. Re-add it under the Secrets tab."
+              else
+                echo "❌ $name is missing from rpg-game → Settings → Secrets and variables → Actions → Secrets"
+              fi
+            fi
           done
           exit $missing
 
