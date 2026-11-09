@@ -64,7 +64,7 @@ jobs:
           fi
 
       - name: Get API key file from ios-certificates
-        if: env.HAS_P8 != 'true'
+        if: env.TOKEN_OK == 'true' || env.HAS_P8 != 'true'
         uses: actions/checkout@v4
         with:
           repository: belgarath534/ios-certificates
@@ -76,18 +76,31 @@ jobs:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
           mkdir -p "$HOME/.asc"
-          if [ -n "$ASC_KEY_P8" ]; then
+          fingerprint() { openssl pkey -in "$1" -pubout 2>/dev/null | openssl sha256 | awk '{print $NF}'; }
+          P8=""
+          [ -d .certs-repo ] && P8=$(find .certs-repo -name '*.p8' -not -path '*/.git/*' | head -1)
+          if [ -n "$P8" ]; then
+            NAME=$(basename "$P8")
+            echo "✅ Found $NAME in ios-certificates"
+            case "$NAME" in
+              *"$ASC_KEY_ID"*) echo "✅ File name matches the ASC_KEY_ID secret" ;;
+              *) echo "❌ File name does NOT contain the ASC_KEY_ID secret — the Key ID is for a different key" ;;
+            esac
+            cp "$P8" "$HOME/.asc/key.p8"
+            if [ -n "$ASC_KEY_P8" ]; then
+              printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/secret.p8"
+              if [ "$(fingerprint "$HOME/.asc/secret.p8")" = "$(fingerprint "$P8")" ]; then
+                echo "✅ ASC_KEY_P8 secret is the same key as the file"
+              else
+                echo "⚠️ ASC_KEY_P8 secret is a DIFFERENT key than $NAME — using the file"
+              fi
+              rm -f "$HOME/.asc/secret.p8"
+            fi
+          elif [ -n "$ASC_KEY_P8" ]; then
             printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/key.p8"
             echo "✅ Using ASC_KEY_P8 secret"
           else
-            P8=$(find .certs-repo -name '*.p8' -not -path '*/.git/*' | head -1)
-            if [ -z "$P8" ]; then echo "❌ No .p8 file found in ios-certificates"; exit 1; fi
-            echo "✅ Found $(basename "$P8") in ios-certificates"
-            case "$(basename "$P8")" in
-              *"$ASC_KEY_ID"*) echo "✅ File name matches ASC_KEY_ID" ;;
-              *) echo "⚠️ File name doesn't contain ASC_KEY_ID — double-check the Key ID secret" ;;
-            esac
-            cp "$P8" "$HOME/.asc/key.p8"
+            echo "❌ No .p8 key found (no ASC_KEY_P8 secret and none in ios-certificates)"; exit 1
           fi
           rm -rf .certs-repo
           echo "ASC_KEY_PATH=$HOME/.asc/key.p8" >> "$GITHUB_ENV"
