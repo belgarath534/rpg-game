@@ -84,10 +84,12 @@ jobs:
           if [ -n "$P8" ]; then
             NAME=$(basename "$P8")
             echo "✅ Found $NAME in ios-certificates"
-            case "$NAME" in
-              *"$ASC_KEY_ID"*) echo "✅ File name matches the ASC_KEY_ID secret" ;;
-              *) echo "❌ File name does NOT contain the ASC_KEY_ID secret — the Key ID is for a different key" ;;
-            esac
+            FILE_KEY_ID=$(echo "$NAME" | sed -n 's/^AuthKey_\([A-Za-z0-9]*\)\.p8$/\1/p')
+            if [ -n "$FILE_KEY_ID" ]; then
+              [ "$FILE_KEY_ID" = "$ASC_KEY_ID" ] && echo "✅ File name matches the ASC_KEY_ID secret" \
+                || echo "⚠️ ASC_KEY_ID secret doesn't match the file — using the Key ID from the file name ($FILE_KEY_ID)"
+              echo "ASC_KEY_ID=$FILE_KEY_ID" >> "$GITHUB_ENV"
+            fi
             cp "$P8" "$HOME/.asc/key.p8"
             if [ -n "$ASC_KEY_P8" ]; then
               printf '%s\n' "$ASC_KEY_P8" > "$HOME/.asc/secret.p8"
