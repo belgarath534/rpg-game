@@ -8,6 +8,8 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     env:
+      # The Issuer ID only identifies the App Store Connect team; it isn't secret.
+      ASC_ISSUER_ID_PUBLIC: cf0b60a4-0dcd-4651-ba53-0aba0bc6c678
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD || secrets.MATCH_PASSWORRD }}
@@ -114,6 +116,9 @@ jobs:
           grep -q -- "-----END PRIVATE KEY-----" "$KEY" && echo "✅ Has END PRIVATE KEY line" || echo "❌ Missing the -----END PRIVATE KEY----- line"
           if openssl pkey -in "$KEY" -noout 2>/dev/null; then echo "✅ Key text is a valid private key"; else echo "❌ Key text is damaged — it isn't a valid private key"; fi
           echo "Key ID length: ${#ASC_KEY_ID} (should be 10). Issuer ID length: ${#ASC_ISSUER_ID} (should be 36)"
+          CLEAN_ISSUER=$(printf '%s' "$ASC_ISSUER_ID" | tr -d '[:space:]')
+          [ "$CLEAN_ISSUER" = "$ASC_ISSUER_ID_PUBLIC" ] && echo "✅ ASC_ISSUER_ID secret matches the Issuer ID in the workflow" \
+            || echo "⚠️ ASC_ISSUER_ID secret is DIFFERENT from cf0b60a4-... — using the one in the workflow"
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:

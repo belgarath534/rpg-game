@@ -18,7 +18,7 @@ platform :ios do
     }
 
     # Try it as a Team key (with Issuer ID) first, then as an Individual key (no Issuer ID).
-    api_key = app_store_connect_api_key(**key_options, issuer_id: ENV.fetch("ASC_ISSUER_ID").strip)
+    api_key = app_store_connect_api_key(**key_options, issuer_id: (ENV["ASC_ISSUER_ID_PUBLIC"] || ENV.fetch("ASC_ISSUER_ID")).strip)
     begin
       Spaceship::ConnectAPI::BundleId.all(limit: 1)
       UI.success("✅ Apple accepted the API key (Team key)")
