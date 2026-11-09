@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum GameSheet: String, Identifiable {
-    case bag, craft, map
+    case bag, craft, map, settings
     var id: String { rawValue }
 }
 
@@ -31,6 +31,7 @@ struct GameView: View {
             case .bag: BagView()
             case .craft: CraftView()
             case .map: MapView()
+            case .settings: SettingsView()
             }
         }
     }
@@ -98,6 +99,15 @@ struct GameView: View {
             menuButton("Bag", "backpack.fill", .bag)
             menuButton("Craft", "hammer.fill", .craft)
             menuButton("Map", "map.fill", .map)
+            Button {
+                sheet = .settings
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.headline)
+                    .frame(width: 48, height: 48)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Settings")
         }
     }
 

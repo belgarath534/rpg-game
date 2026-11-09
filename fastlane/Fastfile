@@ -38,6 +38,11 @@ platform :ios do
       submit_for_review: false,
       automatic_release: false,
       run_precheck_before_submit: false,
+      # Creates the App Review section so fastlane can finish (contact details can be added in App Store Connect).
+      app_review_information: {
+        notes: "Sol Echo is a single-player survival RPG. No account or login is needed. The game is fully playable with VoiceOver.",
+        demo_required: false
+      },
       force: true
     )
     UI.success("📝 App Store listing updated")

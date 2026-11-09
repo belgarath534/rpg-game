@@ -24,6 +24,7 @@ struct RootView: View {
 struct TitleView: View {
     @Environment(GameStore.self) private var store
     @State private var confirmNewGame = false
+    @State private var showSettings = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -49,8 +50,10 @@ struct TitleView: View {
                 }
             }
             .padding(.horizontal, 32)
-            .padding(.bottom, 40)
+            Button("Settings & Credits") { showSettings = true }
+                .padding(.bottom, 32)
         }
+        .sheet(isPresented: $showSettings) { SettingsView() }
         .confirmationDialog("Start a new game? Your current journey will be lost.", isPresented: $confirmNewGame, titleVisibility: .visible) {
             Button("Start New Game", role: .destructive) { store.newGame() }
         }

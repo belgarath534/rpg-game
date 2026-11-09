@@ -12,11 +12,13 @@ final class GameStore {
 
     init() {
         hasSave = UserDefaults.standard.data(forKey: saveKey) != nil
+        AudioManager.shared.update(for: nil)
     }
 
     func newGame() {
         let fresh = Game()
         game = fresh
+        AudioManager.shared.update(for: fresh)
         save()
         announce(fresh.log.map(\.text).joined(separator: " "))
     }
@@ -28,10 +30,12 @@ final class GameStore {
             return
         }
         game = saved
+        AudioManager.shared.update(for: saved)
     }
 
     func quitToTitle() {
         game = nil
+        AudioManager.shared.update(for: nil)
     }
 
     /// Runs a game action, saves, and announces whatever happened.
@@ -39,7 +43,11 @@ final class GameStore {
         guard var current = game else { return }
         let firstNewID = current.nextLogID
         action(&current)
+        let sounds = current.pendingSounds ?? []
+        current.pendingSounds = nil
         game = current
+        AudioManager.shared.play(sounds)
+        AudioManager.shared.update(for: current)
         let news = current.log.filter { $0.id >= firstNewID }.map(\.text)
         if !news.isEmpty { announce(news.joined(separator: " ")) }
         if current.isOver {

@@ -10,6 +10,13 @@ struct LogEntry: Codable, Identifiable, Equatable {
     let tone: Tone
 }
 
+/// Sound effects the game asks the app to play after an action.
+enum Sound: String, Codable {
+    case stepSoft, stepStone, search, pickup, coins, craft, drink, eat, equip
+    case swing, hit, crit, block, hurt, sunbolt, awaken, levelUp, shrine
+    case enemyAppear, shade, enemyDie, flee
+}
+
 struct InventoryEntry: Identifiable {
     let item: Item
     let count: Int
@@ -51,6 +58,8 @@ struct Game: Codable {
     var nextLogID = 0
     var deathCause: String?
     var hasWon = false
+    /// Filled during an action, played and cleared by the app. Optional so older saves still load.
+    var pendingSounds: [Sound]?
 
     init() {
         say("You wake in tall grass. No name. No food. No supplies.", .story)
@@ -88,6 +97,12 @@ struct Game: Codable {
             let n = count(item)
             return n > 0 ? InventoryEntry(item: item, count: n) : nil
         }
+    }
+
+    // MARK: - Sound
+
+    mutating func play(_ sound: Sound) {
+        pendingSounds = (pendingSounds ?? []) + [sound]
     }
 
     // MARK: - Log
@@ -180,6 +195,7 @@ struct Game: Codable {
             return
         }
         position = next
+        play([.mountains, .ruins, .throne].contains(biome) ? .stepStone : .stepSoft)
         let firstVisit = visited.insert(next).inserted
         say("You travel \(direction.rawValue) to the \(biome.regionName).")
         if firstVisit { say(World.description(at: next), .story) }
@@ -231,8 +247,10 @@ struct Game: Codable {
             }
         }
         if found.isEmpty {
+            play(.search)
             say("You search the area but find nothing useful.")
         } else {
+            play(.pickup)
             for (item, n) in found { add(item, n) }
             let text = found.map { "\($0.1) \($0.0.name)" }.joined(separator: ", ")
             say("You find: \(text).", .good)
@@ -240,6 +258,7 @@ struct Game: Codable {
         if biome == .ruins, Double.random(in: 0..<1) < 0.3 {
             let coins = Int.random(in: 2...9)
             gold += coins
+            play(.coins)
             say("Among the rubble you find \(coins) old gold coins.", .good)
         }
         guard passTime(minutes: 45, hunger: 2, thirst: 2, energy: 5) else { return }
@@ -271,6 +290,7 @@ struct Game: Codable {
     mutating func drinkFromLake() {
         guard !isOver, combat == nil, canDrinkHere else { return }
         thirst = 100
+        play(.drink)
         let empty = count(.waterskin)
         if empty > 0 {
             remove(.waterskin, empty)
@@ -293,6 +313,7 @@ struct Game: Codable {
         if Double.random(in: 0..<1) < 0.55 {
             let n = Int.random(in: 1...2)
             add(.rawFish, n)
+            play(.pickup)
             say("A tug on the line! You catch \(n) fish.", .good)
         } else {
             say("The fish aren't biting.")
@@ -338,9 +359,11 @@ struct Game: Codable {
         switch item.kind {
         case .weapon:
             weapon = item
+            play(.equip)
             say("You equip the \(item.name).", .good)
         case .armor:
             armor = item
+            play(.equip)
             say("You put on the \(item.name).", .good)
         case .food, .medicine, .drink:
             guard item.isConsumable else { return }
@@ -349,6 +372,7 @@ struct Game: Codable {
             if item.water > 0 { thirst = min(100, thirst + item.water) }
             if item.heal > 0 { healBy(item.heal) }
             if item == .fullWaterskin { add(.waterskin) }
+            play(item.kind == .food ? .eat : (item == .fullWaterskin ? .drink : .pickup))
             switch item {
             case .rawMeat, .rawFish:
                 say("You eat the \(item.name). Your stomach churns.", .bad)
@@ -374,6 +398,7 @@ struct Game: Codable {
         guard !isOver, combat == nil, canCraft(recipe) else { return }
         for input in recipe.inputs { remove(input.item, input.count) }
         add(recipe.output, recipe.amount)
+        play(.craft)
         say("You craft \(recipe.amount > 1 ? "\(recipe.amount) " : "a ")\(recipe.output.name).", .good)
         passTime(minutes: 20, hunger: 1, thirst: 1, energy: 2)
     }
@@ -382,6 +407,7 @@ struct Game: Codable {
 
     mutating func pray() {
         guard !isOver, combat == nil, let hintIndex = shrineHere else { return }
+        play(.shrine)
         if blessedShrines.insert(position).inserted {
             add(.echoShard)
             health = maxHealth
@@ -401,6 +427,7 @@ struct Game: Codable {
     mutating func awaken() {
         guard canAwaken else { return }
         remove(.echoShard, 3)
+        play(.awaken)
         isWizard = true
         maxMana = 40 + level * 5
         mana = maxMana
@@ -424,6 +451,7 @@ struct Game: Codable {
 
     mutating func startCombat(with enemy: Enemy, ambush: Bool) {
         combat = Combat(enemy: enemy)
+        if !enemy.isPrey { play(enemy.name == "Shade" ? .shade : .enemyAppear) }
         if enemy.isPrey {
             say("You spot a \(enemy.name). The hunt is on.")
         } else if ambush {
@@ -438,6 +466,8 @@ struct Game: Codable {
         var damage = max(1, attackPower + Int.random(in: -2...3) - fight.enemy.defense)
         let crit = Double.random(in: 0..<1) < 0.1
         if crit { damage *= 2 }
+        play(.swing)
+        play(crit ? .crit : .hit)
         fight.enemy.health = max(0, fight.enemy.health - damage)
         fight.defending = false
         combat = fight
@@ -448,6 +478,7 @@ struct Game: Codable {
     mutating func defend() {
         guard combat != nil else { return }
         combat?.defending = true
+        play(.block)
         energy = min(100, energy + 3)
         say("You raise your guard.")
         finishPlayerTurn()
@@ -458,6 +489,7 @@ struct Game: Codable {
     mutating func castSunbolt() {
         guard var fight = combat, canCastSunbolt else { return }
         mana -= Game.sunboltCost
+        play(.sunbolt)
         let damage = 16 + level * 3 + Int.random(in: 0...4)
         fight.enemy.health = max(0, fight.enemy.health - damage)
         fight.defending = false
@@ -487,6 +519,7 @@ struct Game: Codable {
         }
         if Double.random(in: 0..<1) < 0.55 {
             combat = nil
+            play(.flee)
             energy = max(0, energy - 5)
             say("You escape from the \(fight.enemy.name).")
         } else {
@@ -514,8 +547,10 @@ struct Game: Codable {
         var damage = max(0, fight.enemy.attack + Int.random(in: -2...2) - defensePower)
         if fight.defending { damage /= 2 }
         if damage == 0 {
+            play(.block)
             say("The \(fight.enemy.name) attacks, but you take no damage.")
         } else {
+            play(.hurt)
             say("The \(fight.enemy.name) hits you for \(damage).", .bad)
             hurt(damage, cause: "Slain by \(fight.enemy.name == "The Hollow King" ? "the Hollow King" : "a \(fight.enemy.name)")")
         }
@@ -524,6 +559,7 @@ struct Game: Codable {
 
     private mutating func win(against enemy: Enemy) {
         combat = nil
+        play(.enemyDie)
         say(enemy.isPrey ? "You bring down the \(enemy.name)." : "You defeat the \(enemy.name)!", .good)
         var drops: [String] = []
         for drop in enemy.loot where Double.random(in: 0..<1) < drop.chance {
@@ -533,6 +569,7 @@ struct Game: Codable {
         }
         let coins = Int.random(in: enemy.goldMin...enemy.goldMax)
         if coins > 0 {
+            play(.coins)
             gold += coins
             drops.append("\(coins) gold")
         }
@@ -551,6 +588,7 @@ struct Game: Codable {
         while xp >= xpToNext {
             xp -= xpToNext
             level += 1
+            play(.levelUp)
             maxHealth += 10
             healBy(20)
             if isWizard {
