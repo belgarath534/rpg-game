@@ -91,6 +91,12 @@ jobs:
           fi
           rm -rf .certs-repo
           echo "ASC_KEY_PATH=$HOME/.asc/key.p8" >> "$GITHUB_ENV"
+          KEY="$HOME/.asc/key.p8"
+          echo "Key file: $(wc -l < "$KEY" | tr -d ' ') lines, $(wc -c < "$KEY" | tr -d ' ') characters (a real .p8 is 6 lines, about 257 characters)"
+          grep -q -- "-----BEGIN PRIVATE KEY-----" "$KEY" && echo "✅ Has BEGIN PRIVATE KEY line" || echo "❌ Missing the -----BEGIN PRIVATE KEY----- line"
+          grep -q -- "-----END PRIVATE KEY-----" "$KEY" && echo "✅ Has END PRIVATE KEY line" || echo "❌ Missing the -----END PRIVATE KEY----- line"
+          if openssl pkey -in "$KEY" -noout 2>/dev/null; then echo "✅ Key text is a valid private key"; else echo "❌ Key text is damaged — it isn't a valid private key"; fi
+          echo "Key ID length: ${#ASC_KEY_ID} (should be 10). Issuer ID length: ${#ASC_ISSUER_ID} (should be 36)"
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:

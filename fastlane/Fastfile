@@ -10,14 +10,32 @@ platform :ios do
   lane :beta do
     setup_ci
 
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("ASC_KEY_ID"),
-      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_options = {
+      key_id: ENV.fetch("ASC_KEY_ID").strip,
       key_filepath: ENV.fetch("ASC_KEY_PATH"),
       duration: 1200,
       in_house: false
-    )
-    UI.success("✅ App Store Connect API key works")
+    }
+
+    # Try it as a Team key (with Issuer ID) first, then as an Individual key (no Issuer ID).
+    api_key = app_store_connect_api_key(**key_options, issuer_id: ENV.fetch("ASC_ISSUER_ID").strip)
+    begin
+      Spaceship::ConnectAPI::BundleId.all(limit: 1)
+      UI.success("✅ Apple accepted the API key (Team key)")
+    rescue StandardError => team_error
+      UI.important("Apple rejected the key as a Team key (#{team_error.message.lines.first&.strip}). Trying as an Individual key...")
+      begin
+        api_key = app_store_connect_api_key(**key_options, issuer_id: nil)
+        Spaceship::ConnectAPI::BundleId.all(limit: 1)
+        UI.success("✅ Apple accepted the API key (Individual key)")
+      rescue StandardError
+        UI.user_error!(
+          "❌ Apple rejected the API key. One of these doesn't match: the .p8 text (ASC_KEY_P8), " \
+          "the Key ID (ASC_KEY_ID) or the Issuer ID (ASC_ISSUER_ID). Check the 'Find .p8 key' step for clues, " \
+          "and make sure the key wasn't revoked in App Store Connect."
+        )
+      end
+    end
 
     # Register the Bundle ID automatically if it doesn't exist yet.
     if Spaceship::ConnectAPI::BundleId.find(APP_ID)
